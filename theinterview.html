@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Eye Of The Market</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #0f0f1a;
+      color: #e0e0ff;
+    }
+
+    .wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 36px;
+      margin-bottom: 30px;
+      color: #a259ff;
+      letter-spacing: 1px;
+    }
+
+    .search-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+
+    input[type="text"] {
+      padding: 12px 16px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      background-color: #1f1f2e;
+      color: #fff;
+      width: 300px;
+      max-width: 90vw;
+    }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      background: linear-gradient(145deg, #7f00ff, #9b59b6);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: 0.3s ease;
+    }
+
+    button:hover {
+      background: linear-gradient(145deg, #9b59b6, #7f00ff);
+    }
+
+    #result {
+      width: 100%;
+      max-width: 900px;
+      margin-top: 40px;
+      text-align: center;
+    }
+
+    #stockName {
+      font-size: 24px;
+      color: #bb86fc;
+      margin-bottom: 10px;
+    }
+
+    #stockPrice {
+      font-size: 20px;
+      margin-bottom: 5px;
+    }
+
+    #forecastChange {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #00e676;
+    }
+
+    .decrease {
+      color: #ff5252 !important;
+    }
+
+    .chart-container {
+      width: 800px;
+      height: 400px;
+      max-width: 100%;
+      margin: 0 auto;
+      background-color: #111;
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    @media (max-width: 600px) {
+      .chart-container {
+        height: 300px;
+      }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="wrapper">
+    <h1>Eye Of The Market</h1>
+    <div class="search-container">
+      <input type="text" id="tickerInput" placeholder="Enter stock symbol (e.g., AAPL)">
+      <button onclick="searchStock()">Predict</button>
+    </div>
+    <div id="result">
+      <h2 id="stockName"></h2>
+      <p id="stockPrice"></p>
+      <p id="forecastChange"></p>
+      <div class="chart-container">
+        <canvas id="stockChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = '68D1KLDSWT0YH7GG'; // Replace with your actual Alpha Vantage API key
+
+    // מחשב ממוצע נע פשוט (Simple Moving Average) על מערך מספרים עם חלון נתון
+    function simpleMovingAverage(data, windowSize) {
+      if (data.length < windowSize) return [];
+      const averages = [];
+      for (let i = 0; i <= data.length - windowSize; i++) {
+        const windowSlice = data.slice(i, i + windowSize);
+        const avg = windowSlice.reduce((acc, val) => acc + val, 0) / windowSize;
+        averages.push(avg);
+      }
+      return averages;
+    }
+
+    async function searchStock() {
+      const ticker = document.getElementById('tickerInput').value.toUpperCase();
+      if (!ticker) return;
+
+      const chartUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&apikey=${API_KEY}`;
+
+      try {
+        const chartResp = await fetch(chartUrl);
+        const chartData = await chartResp.json();
+        const timeSeries = chartData["Time Series (Daily)"];
+        if (!timeSeries) {
+          alert("Invalid API response. Check the stock symbol or API key.");
+          return;
+        }
+
+        const allDates = Object.keys(timeSeries);
+        const last30Dates = allDates.slice(0, 30).reverse();
+        const closePrices = last30Dates.map(date => parseFloat(timeSeries[date]["4. close"]));
+
+        // חישוב שינויים יומיים במחיר
+        let dailyChanges = [];
+        for (let i = 1; i < closePrices.length; i++) {
+          dailyChanges.push(closePrices[i] - closePrices[i - 1]);
+        }
+
+        // חישוב ממוצע נע של השינויים עם חלון 5 ימים
+        const windowSize = 5;
+        const movingAvgs = simpleMovingAverage(dailyChanges, windowSize);
+
+        // ממוצע השינוי היומי האחרון מתוך הממוצעים הנעים, אם אין מספיק נתונים משתמשים בממוצע כולל
+        const avgDailyChange = movingAvgs.length ? movingAvgs[movingAvgs.length - 1] : dailyChanges.reduce((a,b) => a + b, 0) / dailyChanges.length;
+
+        // חיזוי מחירי 7 הימים הבאים בהתבסס על ממוצע השינוי היומי
+        const forecastPrices = [];
+        let lastKnownPrice = closePrices[closePrices.length - 1];
+        for (let i = 1; i <= 7; i++) {
+          lastKnownPrice += avgDailyChange;
+          forecastPrices.push(lastKnownPrice);
+        }
+
+        // יצירת תאריכי התחזית
+        const lastDateStr = last30Dates[last30Dates.length - 1];
+        const lastDate = new Date(lastDateStr);
+        const forecastDates = [];
+        for (let i = 1; i <= 7; i++) {
+          const nextDate = new Date(lastDate);
+          nextDate.setDate(lastDate.getDate() + i);
+          forecastDates.push(nextDate.toISOString().split('T')[0]);
+        }
+
+        const lastPrice = closePrices[closePrices.length - 1];
+        const forecastLast = forecastPrices[forecastPrices.length - 1];
+        const percentChange = ((forecastLast - lastPrice) / lastPrice) * 100;
+
+        let changeText = '';
+        const forecastChangeElem = document.getElementById('forecastChange');
+        if (Math.abs(percentChange) < 0.1) {
+          changeText = `No significant change expected`;
+          forecastChangeElem.className = '';
+        } else if (percentChange > 0) {
+          changeText = `Expected increase of +${percentChange.toFixed(2)}%`;
+          forecastChangeElem.className = '';
+        } else {
+          changeText = `Expected decrease of ${percentChange.toFixed(2)}%`;
+          forecastChangeElem.className = 'decrease';
+        }
+
+        document.getElementById('stockName').innerText = `Stock: ${ticker}`;
+        document.getElementById('stockPrice').innerText = `Forecast for next 7 days`;
+        forecastChangeElem.innerText = changeText;
+
+        renderChart(last30Dates, closePrices, forecastDates, forecastPrices);
+      } catch (error) {
+        alert("Error fetching data. Please check the stock symbol or API key.");
+        console.error(error);
+      }
+    }
+
+    let chart;
+
+    function renderChart(pastLabels, pastData, forecastLabels, forecastData) {
+      const ctx = document.getElementById('stockChart').getContext('2d');
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [...pastLabels, ...forecastLabels],
+          datasets: [
+            {
+              label: 'Last 30 Days',
+              data: pastData,
+              borderColor: '#bb86fc',
+              backgroundColor: 'rgba(187,134,252,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2
+            },
+            {
+              label: 'Forecast (next 7 days)',
+              data: Array(pastData.length).fill(null).concat(forecastData),
+              borderColor: '#ff4081',
+              borderDash: [5, 5],
+              fill: false,
+              tension: 0.3,
+              pointRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: false,
+              ticks: {
+                color: '#e0e0ff'
+              }
+            },
+            x: {
+              ticks: {
+                color: '#e0e0ff'
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: {
+                color: '#e0e0ff'
+              }
+            }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
